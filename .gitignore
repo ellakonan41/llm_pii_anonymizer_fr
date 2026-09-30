@@ -1,0 +1,39 @@
+# Données (téléchargées depuis Hugging Face, jamais versionnées)
+data/*
+!data/.gitkeep
+
+# Modèles et adaptateurs LoRA (publiés sur le Hugging Face Hub, pas dans git)
+models/*
+!models/.gitkeep
+*.safetensors
+*.bin
+*.pt
+checkpoints/
+outputs/
+wandb/
+runs/
+
+# Environnements virtuels
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Secrets (tokens Hugging Face, W&B...)
+.env
+*.env.local
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
