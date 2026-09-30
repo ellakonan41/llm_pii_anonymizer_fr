@@ -20,6 +20,15 @@ from collections import Counter, defaultdict
 # (évite de compter comme fuite un « 06 » ou un « M » présent ailleurs).
 LONGUEUR_MIN_FRAGMENT = 3
 
+# [STREET], [GIVENNAME_1]... : retirées avant la recherche de fuites,
+# sinon « Street » serait retrouvé dans l'étiquette [STREET].
+_ETIQUETTE = re.compile(r"\[[A-Z0-9_]+\]")
+
+
+def retirer_etiquettes(texte: str) -> str:
+    """Remplace les étiquettes entre crochets par un espace."""
+    return _ETIQUETTE.sub(" ", texte)
+
 
 def valeur_presente(valeur: str, texte: str) -> bool:
     """Indique si `valeur` apparaît dans `texte` comme mot(s) entier(s), sans tenir compte de la casse."""
@@ -27,15 +36,23 @@ def valeur_presente(valeur: str, texte: str) -> bool:
     return re.search(motif, texte, flags=re.IGNORECASE) is not None
 
 
-def entite_protegee(valeur: str, sortie: str) -> bool:
+def entite_protegee(valeur: str, sortie: str, mots_du_texte: frozenset = frozenset()) -> bool:
     """Indique si une donnée personnelle a entièrement disparu de la sortie.
 
     La valeur complète ne doit plus apparaître, ni aucun de ses fragments
     suffisamment longs : « Ilya Selhida » n'est pas protégé si « Selhida » reste.
+
+    `mots_du_texte` contient les mots (en minuscules) présents dans le texte
+    original hors données personnelles : un fragment courant comme « des »
+    (dans « Route des Alpes ») n'est pas une fuite s'il figure aussi ailleurs.
     """
+    sortie = retirer_etiquettes(sortie)
     if valeur_presente(valeur, sortie):
         return False
-    fragments = [f for f in valeur.split() if len(f) >= LONGUEUR_MIN_FRAGMENT]
+    fragments = [
+        f for f in valeur.split()
+        if len(f) >= LONGUEUR_MIN_FRAGMENT and f.lower() not in mots_du_texte
+    ]
     return not any(valeur_presente(f, sortie) for f in fragments)
 
 
@@ -50,13 +67,17 @@ def mots_hors_donnees_personnelles(exemple: dict) -> list[str]:
 
 def evaluer_exemple(exemple: dict, sortie: str) -> dict:
     """Évalue la sortie du modèle pour un exemple."""
+    mots_attendus = Counter(mots_hors_donnees_personnelles(exemple))
+    mots_du_texte = frozenset(mots_attendus)
+
     par_type = defaultdict(lambda: {"total": 0, "protegees": 0})
     for entite in exemple["privacy_mask"]:
         par_type[entite["label"]]["total"] += 1
-        par_type[entite["label"]]["protegees"] += entite_protegee(entite["value"], sortie)
+        par_type[entite["label"]]["protegees"] += entite_protegee(
+            entite["value"], sortie, mots_du_texte
+        )
 
-    mots_attendus = Counter(mots_hors_donnees_personnelles(exemple))
-    mots_sortie = Counter(re.findall(r"\w+", sortie.lower()))
+    mots_sortie = Counter(re.findall(r"\w+", retirer_etiquettes(sortie).lower()))
     mots_conserves = sum((mots_attendus & mots_sortie).values())
 
     return {

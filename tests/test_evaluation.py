@@ -60,6 +60,28 @@ def test_fragment_court_restant_n_est_pas_une_fuite():
     assert entite_protegee("06 12 34 56 78", "[TELEPHONENUM], rendez-vous le 06.")
 
 
+def test_fragment_retrouve_dans_une_etiquette_n_est_pas_une_fuite():
+    # « Street » ne doit pas être retrouvé dans l'étiquette [STREET].
+    assert entite_protegee("Winston Street", "Rendez-vous : [STREET], [CITY].")
+
+
+def test_fragment_present_ailleurs_dans_le_texte_n_est_pas_une_fuite():
+    # « des » figure aussi dans « Liste des rues », hors donnée personnelle.
+    assert entite_protegee(
+        "Route des Grandes Alpes",
+        "Liste des rues : [STREET].",
+        mots_du_texte=frozenset({"liste", "des", "rues"}),
+    )
+
+
+def test_fragment_absent_du_reste_du_texte_reste_une_fuite():
+    assert not entite_protegee(
+        "Route des Grandes Alpes",
+        "Liste des rues : Grandes Alpes.",
+        mots_du_texte=frozenset({"liste", "des", "rues"}),
+    )
+
+
 # --- mots_hors_donnees_personnelles ---
 
 def test_mots_hors_donnees_personnelles():
@@ -93,6 +115,30 @@ def test_etiquette_differente_mais_donnee_protegee():
     r = evaluer_exemple(EXEMPLE, "Appelez [GIVENNAME] au [TELEPHONENUM].")
     assert r["nb_protegees"] == 3
     assert not r["exact"]
+
+
+def test_reference_avec_mot_courant_dans_une_ville_est_sans_fuite():
+    # Cas réel : « Ville » figure aussi dans « ma ville natale ».
+    source = "Ma ville natale, Nantes Centre Ville, a changé."
+    exemple = {
+        "source_text": source,
+        "masked_text": "Ma ville natale, [CITY], a changé.",
+        "privacy_mask": [{"label": "CITY", "value": "Nantes Centre Ville", "start": 17, "end": 36}],
+    }
+    assert source[17:36] == "Nantes Centre Ville"
+    r = evaluer_exemple(exemple, exemple["masked_text"])
+    assert r["nb_protegees"] == 1
+
+
+def test_etiquettes_ignorees_pour_la_preservation():
+    # « street » hors donnée personnelle ne doit pas être « conservé » via l'étiquette [STREET].
+    exemple = {
+        "source_text": "Street art à Lyon.",
+        "masked_text": "Street art à [CITY].",
+        "privacy_mask": [{"label": "CITY", "value": "Lyon", "start": 13, "end": 17}],
+    }
+    r = evaluer_exemple(exemple, "[STREET] art à [CITY].")
+    assert r["nb_mots_conserves"] == r["nb_mots_attendus"] - 1
 
 
 def test_espaces_superflus_ignores_pour_la_correspondance_exacte():
