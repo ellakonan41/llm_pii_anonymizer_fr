@@ -23,3 +23,14 @@ def construire_messages(texte: str) -> list[dict]:
         {"role": "system", "content": INSTRUCTION},
         {"role": "user", "content": texte},
     ]
+
+
+def exemple_sft(exemple: dict) -> dict:
+    """Exemple au format « prompt / completion » conversationnel attendu par le SFTTrainer de trl.
+
+    La loss n'est calculée que sur la completion (la réponse attendue).
+    """
+    return {
+        "prompt": construire_messages(exemple["source_text"]),
+        "completion": [{"role": "assistant", "content": exemple["masked_text"]}],
+    }

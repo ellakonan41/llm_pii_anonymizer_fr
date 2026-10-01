@@ -1,0 +1,7 @@
+# Dépendances des notebooks (exécutés sur Kaggle, GPU T4)
+torch
+transformers>=4.56.2
+datasets>=4.7.0
+trl==0.29.1
+peft
+tqdm
