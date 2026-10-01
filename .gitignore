@@ -1,6 +1,8 @@
 # Données (téléchargées depuis Hugging Face, jamais versionnées)
 data/*
 !data/.gitkeep
+# Jeu de test réaliste, écrit et annoté à la main : versionné
+!data/test_realiste.jsonl
 
 # Modèles et adaptateurs LoRA (publiés sur le Hugging Face Hub, pas dans git)
 models/*
