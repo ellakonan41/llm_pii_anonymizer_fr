@@ -158,6 +158,7 @@ def test_evaluer_agrege_les_exemples():
     assert resultats["correspondance_exacte"] == 0.5
     assert resultats["protection_par_type"]["SURNAME"] == 0.5
     assert resultats["protection_par_type"]["GIVENNAME"] == 1.0
+    assert resultats["effectifs_par_type"] == {"GIVENNAME": 2, "SURNAME": 2, "TELEPHONENUM": 2}
 
 
 def test_texte_sans_entite_compte_comme_sans_fuite():

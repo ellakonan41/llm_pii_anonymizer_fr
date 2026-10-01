@@ -124,4 +124,9 @@ def evaluer(exemples: list[dict], sorties: list[str]) -> dict:
             label: _taux(c["protegees"], c["total"])
             for label, c in sorted(par_type.items(), key=lambda kv: -kv[1]["total"])
         },
+        # Nombre d'entités par type : un taux sur 3 cas n'est pas significatif.
+        "effectifs_par_type": {
+            label: c["total"]
+            for label, c in sorted(par_type.items(), key=lambda kv: -kv[1]["total"])
+        },
     }
