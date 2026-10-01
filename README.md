@@ -8,7 +8,8 @@ Entrée : Bonjour, je suis Sherap Iblikci et j'aimerais commander un puzzle.
 Sortie : Bonjour, je suis [GIVENNAME] [SURNAME] et j'aimerais commander un puzzle.
 ```
 
-> 🚧 Projet en cours : SFT et évaluation sur textes réalistes terminés, DPO à venir.
+> SFT, évaluation sur textes réalistes et premier essai de DPO réalisés. Un second réglage du
+> DPO et un second jeu de test réaliste sont en cours.
 
 ## Problématique
 
@@ -27,14 +28,27 @@ Deux jeux de test, identiques pour toutes les versions :
   rédigés et vérifiés pour ce projet, avec des noms, adresses et formats français absents des
   données d'entraînement ([guide d'annotation](docs/guide_annotation.md)).
 
-| Métrique | v0, synthétique | **v1, synthétique** | v0, réaliste | **v1, réaliste** |
-|---|---|---|---|---|
-| Protection (données personnelles masquées) | 42,9 % | **99,7 %** | 25,0 % | **97,0 %** |
-| Textes sans aucune fuite | 39,8 % | **99,4 %** | 24,0 % | **88,0 %** |
-| Préservation du texte non personnel | 27,2 % | **99,7 %** | 38,3 % | **99,5 %** |
-| Correspondance exacte avec la référence | 0,0 % | **77,8 %** | 4,0 % | **48,0 %** |
+**Test réaliste (50 textes)**
 
-v0 : modèle de base (zero-shot). v1 : après SFT avec LoRA.
+| Métrique | v0 : modèle de base | **v1 : SFT** | v3 : SFT + DPO |
+|---|---|---|---|
+| Protection (données personnelles masquées) | 25,0 % | **97,0 %** | 100 % |
+| Textes sans aucune fuite | 24,0 % | **88,0 %** | 100 % |
+| Préservation du texte non personnel | 38,3 % | **99,5 %** | 98,1 % |
+| Correspondance exacte avec la référence | 4,0 % | **48,0 %** | 54,0 % |
+
+**Test synthétique (500 textes)**
+
+| Métrique | v0 : modèle de base | **v1 : SFT** | v3 : SFT + DPO |
+|---|---|---|---|
+| Protection | 42,9 % | **99,5 %** | 99,9 % |
+| Textes sans aucune fuite | 39,8 % | **99,0 %** | 99,8 % |
+| Préservation | 27,2 % | **99,7 %** | 99,3 % |
+| Correspondance exacte | 0,0 % | **76,8 %** | 68,0 % |
+
+v0 : modèle de base (zero-shot). v1 : SFT avec LoRA. v3 : DPO à partir de la v1.
+Le DPO supprime toutes les fuites du test réaliste, mais introduit des masquages injustifiés et
+des modifications du texte (voir [l'analyse](#8-dpo-v3)) : **la v1 reste la version de référence**.
 
 Le modèle de base ne suit pas la consigne : il recopie le texte sans le masquer, le reformule en
 listes, répond aux questions qu'il contient ou modifie des noms. Seules 14,8 % de ses sorties
@@ -50,9 +64,13 @@ correctement les données et conserve le reste du texte.
 
 Sur les textes réalistes, la v1 reconnaît tous les noms, y compris les cas ambigus (Rose, Marine,
 Petit, Blanc, Jean-Baptiste Le Goff, noms en majuscules) et tous les identifiants français
-(sécurité sociale, numéro fiscal, permis). Le passage de 99,4 % à 88 % de textes sans fuite
+(sécurité sociale, numéro fiscal, permis). Le passage de 99 % à 88 % de textes sans fuite
 mesure l'écart de généralisation : les fuites se concentrent sur des formats absents des données
 synthétiques (voir l'[analyse des erreurs](#7-évaluation-sur-textes-réalistes-v1)).
+
+Les chiffres de la v1 sont ceux de l'adaptateur sauvegardé. Un premier entraînement, avec les
+mêmes données et réglages, avait obtenu 99,7 % de protection et 99,4 % de textes sans fuite sur le
+test synthétique : l'écart vient du non-déterminisme de certains calculs sur GPU.
 
 ## Démarche
 
@@ -97,6 +115,9 @@ Une anonymisation se juge sur deux axes opposés, comme le rappel et la précisi
   tout obtiendrait une protection parfaite ;
 - **textes sans fuite** : le point de vue de l'utilisateur, un seul oubli suffisant à rendre
   un document non conforme ;
+- **textes fidèles** : part des textes où le modèle n'ajoute aucun mot absent du texte original et
+  n'invente aucune étiquette ; ajoutée après le DPO, car la préservation ne voit pas ce que le
+  modèle ajoute ou modifie (« 5 jours » réécrit en « [AGE] ans ») ;
 - **correspondance exacte** : indicative, pénalisée par les incohérences d'annotation.
 
 La protection ne vérifie pas le type d'étiquette choisi, seulement la disparition de la donnée :
@@ -131,7 +152,7 @@ les métriques de la tâche disent si les données personnelles sont bien masqu�
 
 ### 6. Analyse des erreurs (v1)
 
-Sur les 3 textes signalés comme fuites :
+Analyse réalisée sur le premier entraînement. Sur les 3 textes signalés comme fuites :
 - **une vraie fuite partielle** : un prénom rare et ambigu (« Wiki Emilce » → « Wiki [GIVENNAME] ») ;
 - **une erreur d'annotation** du jeu de données : « les années 27 », étiqueté comme un âge, que
   le modèle a eu raison de ne pas masquer ;
@@ -163,8 +184,48 @@ Des erreurs de fidélité apparaissent aussi : deux dates fusionnées en une seu
 d'établissement masqué à tort (« hôpital Pellegrin »), et une faute de frappe introduite dans un
 texte sans aucune donnée personnelle (« vestiaires » → « vestiares »).
 
-Ces faiblesses orientent la suite du projet. Les paires de préférences du DPO seront construites
-sur des textes d'entraînement distincts du jeu de test, pour que celui-ci reste une mesure fiable.
+### 8. DPO (v3)
+
+**Données** ([`src/dpo.py`](src/dpo.py)) : 1 200 paires de préférences, à partir de 800 textes
+générés par gabarits ciblant les faiblesses observées (heures et dates au format français, noms de
+rue composés de mots courants, phrases sans donnée personnelle) et de 400 textes ai4privacy jamais
+utilisés (sans adresse, les deux sources n'annotant pas les rues de la même façon). Les noms, villes
+et rues des gabarits sont distincts de ceux du test réaliste, ce que vérifie un test automatique.
+
+La réponse rejetée est l'erreur de la v1 elle-même lorsqu'elle se trompe : c'est le cas pour
+**335 textes sur 1 200 (28 %)**, ce qui confirme que les gabarits ciblent ses vraies faiblesses.
+Sinon, une erreur est construite à partir de la bonne réponse : donnée remise en clair, faute de
+frappe ou mot masqué à tort.
+
+**Entraînement** ([notebook 06](notebooks/06-dpo-v3.ipynb)) : `DPOTrainer` de `trl`, nouvel
+adaptateur LoRA sur la v1 fusionnée, qui sert aussi de modèle de référence ; `beta` = 0,1, loss DPO
+combinée à une loss SFT sur la réponse choisie, learning rate 2e-5, batch effectif de 16.
+Un premier essai a dépassé la mémoire du GPU : le DPO calcule les logits de deux réponses par
+exemple, pour le modèle et sa référence, sur un vocabulaire de 152 000 tokens. Le batch a été
+réduit et compensé par l'accumulation de gradients.
+
+**Résultats** : toutes les fuites du test réaliste disparaissent (100 % de textes sans fuite,
+heures, dates et rues comprises). Mais l'analyse des sorties révèle une **sur-optimisation** :
+- des **masquages injustifiés** : « carte Vitale » → « carte [CITY] », « lundi de Pâques » →
+  « lundi de [DATE] », « salle B », « Formulaire CAF » ;
+- des **modifications du texte** : « paracétamol 1 g … pendant 5 jours » devient
+  « paracétamol [量] g … pendant [AGE] ans », une étiquette inexistante est inventée
+  (`[RESOURCES_HUMANITIES]`), des mots sont supprimés (« Assuré : », « née le »).
+
+Poussé à éviter les fuites, le modèle masque dans le doute et s'éloigne de la v1 au point de perdre
+en stabilité. Ces défauts restaient presque invisibles dans les métriques (préservation de 99,5 % à
+98,1 %), qui ne détectaient pas les mots ajoutés ou modifiés : d'où l'ajout de la métrique de
+fidélité. Pour un outil d'anonymisation, modifier le contenu d'une ordonnance est aussi grave qu'une
+fuite : **la v3 n'est pas retenue**.
+
+Deux réserves sur ces résultats : le test réaliste a servi à identifier les faiblesses que le DPO
+cible, ses scores sur la v3 sont donc probablement optimistes ; et sur le test synthétique, la baisse
+de correspondance exacte s'explique en partie par la convention d'annotation des rues apprise
+pendant le DPO, différente de celle du jeu de données.
+
+**Prochaines étapes** : un DPO plus conservateur (`beta` plus élevé, learning rate plus faible,
+davantage de paires contre les masquages injustifiés et les modifications du texte), évalué avec la
+métrique de fidélité sur un second jeu de test réaliste, jamais utilisé pour orienter l'entraînement.
 
 ## Limites
 
@@ -172,6 +233,8 @@ sur des textes d'entraînement distincts du jeu de test, pour que celui-ci reste
   français sous-représentés ; le jeu de test réaliste ne compte que 50 textes.
 - **Fidélité de la recopie** : un petit modèle peut modifier un mot du texte non personnel ;
   une relecture reste nécessaire avant diffusion d'un document anonymisé.
+- **Test réaliste réutilisé** : ayant servi à orienter le DPO, il ne constitue plus une mesure
+  indépendante pour la v3.
 - **Définition des données personnelles** héritée du jeu de données : les heures (TIME) et les
   titres (TITLE) sont considérés comme personnels, ce qui est discutable.
 - **Types rares** : quelques cas seulement dans le test (4 pour GENDER, 7 pour SOCIALNUM),
@@ -182,20 +245,23 @@ sur des textes d'entraînement distincts du jeu de test, pour que celui-ci reste
 ## Suite du projet
 
 - [x] Jeu de test de textes français réalistes
-- [ ] DPO ciblé sur les faiblesses observées (formats français de dates et d'heures, noms de rue, fidélité)
+- [x] Premier DPO ciblé sur les faiblesses observées
+- [x] Métrique de fidélité (mots ajoutés, étiquettes inventées)
+- [ ] DPO plus conservateur, évalué sur un second jeu de test réaliste
 - [ ] v2 : nettoyage complet (déduplication, plafonnement par structure, échantillonnage des types rares, filtre qualité)
 - [ ] Publication de l'adaptateur LoRA sur le Hugging Face Hub
 
 ## Structure du dépôt
 
 ```
-├── notebooks/          # Exploration, préparation, baseline, SFT, test réaliste (exécutés sur Kaggle)
+├── notebooks/          # Exploration, préparation, baseline, SFT, test réaliste, DPO (exécutés sur Kaggle)
 ├── src/
 │   ├── cleaning.py     # Nettoyage et échantillonnage des données
 │   ├── prompt.py       # Consigne et format des exemples, communs à l'entraînement et à l'évaluation
 │   ├── generation.py   # Génération des anonymisations par lots
-│   ├── evaluation.py   # Métriques : protection, préservation, correspondance exacte
-│   └── annotation.py   # Construction d'exemples annotés (jeu de test réaliste)
+│   ├── evaluation.py   # Métriques : protection, préservation, fidélité, correspondance exacte
+│   ├── annotation.py   # Construction d'exemples annotés (jeu de test réaliste)
+│   └── dpo.py          # Génération des textes ciblés et des paires de préférences
 ├── data/
 │   └── test_realiste.jsonl  # 50 textes réalistes annotés
 ├── tests/              # Tests unitaires (pytest)
