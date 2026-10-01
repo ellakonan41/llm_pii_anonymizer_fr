@@ -8,7 +8,7 @@ Entrée : Bonjour, je suis Sherap Iblikci et j'aimerais commander un puzzle.
 Sortie : Bonjour, je suis [GIVENNAME] [SURNAME] et j'aimerais commander un puzzle.
 ```
 
-> 🚧 Projet en cours : SFT terminé, test sur textes réalistes et DPO à venir.
+> 🚧 Projet en cours : SFT et évaluation sur textes réalistes terminés, DPO à venir.
 
 ## Problématique
 
@@ -21,14 +21,20 @@ des textes de façon fiable ?**
 
 ## Résultats
 
-Évaluation sur 500 textes de test, identiques pour toutes les versions.
+Deux jeux de test, identiques pour toutes les versions :
+- **synthétique** : 500 textes issus du même générateur que les données d'entraînement ;
+- **réaliste** : 50 textes français (e-mails, SMS, formulaires médicaux, RH, administratifs...)
+  rédigés et vérifiés pour ce projet, avec des noms, adresses et formats français absents des
+  données d'entraînement ([guide d'annotation](docs/guide_annotation.md)).
 
-| Métrique | v0 : modèle de base (zero-shot) | **v1 : après SFT (LoRA)** |
-|---|---|---|
-| Protection (données personnelles masquées) | 42,9 % | **99,7 %** |
-| Textes sans aucune fuite | 39,8 % | **99,4 %** |
-| Préservation du texte non personnel | 27,2 % | **99,7 %** |
-| Correspondance exacte avec la référence | 0,0 % | **77,8 %** |
+| Métrique | v0, synthétique | **v1, synthétique** | v0, réaliste | **v1, réaliste** |
+|---|---|---|---|---|
+| Protection (données personnelles masquées) | 42,9 % | **99,7 %** | 25,0 % | **97,0 %** |
+| Textes sans aucune fuite | 39,8 % | **99,4 %** | 24,0 % | **88,0 %** |
+| Préservation du texte non personnel | 27,2 % | **99,7 %** | 38,3 % | **99,5 %** |
+| Correspondance exacte avec la référence | 0,0 % | **77,8 %** | 4,0 % | **48,0 %** |
+
+v0 : modèle de base (zero-shot). v1 : après SFT avec LoRA.
 
 Le modèle de base ne suit pas la consigne : il recopie le texte sans le masquer, le reformule en
 listes, répond aux questions qu'il contient ou modifie des noms. Seules 14,8 % de ses sorties
@@ -42,9 +48,11 @@ correctement les données et conserve le reste du texte.
 | Bonjour, je suis Sherap Iblikci et j'aimerais commander un puzzle… | `**Sherap Iblikci**` `**Commande**` `**Puzzle**`… | Bonjour, je suis [GIVENNAME] [SURNAME] et j'aimerais commander un puzzle… |
 | Disposez-vous d'une assurance responsabilité civile ? | `[YES]` | Disposez-vous d'une assurance responsabilité civile ? |
 
-> ⚠️ Le jeu de test provient du même générateur synthétique que les données d'entraînement.
-> Ces scores mesurent la maîtrise de la tâche sur cette distribution, pas encore la performance
-> sur des documents réels : un jeu de test de textes français réalistes est en préparation.
+Sur les textes réalistes, la v1 reconnaît tous les noms, y compris les cas ambigus (Rose, Marine,
+Petit, Blanc, Jean-Baptiste Le Goff, noms en majuscules) et tous les identifiants français
+(sécurité sociale, numéro fiscal, permis). Le passage de 99,4 % à 88 % de textes sans fuite
+mesure l'écart de généralisation : les fuites se concentrent sur des formats absents des données
+synthétiques (voir l'[analyse des erreurs](#7-évaluation-sur-textes-réalistes-v1)).
 
 ## Démarche
 
@@ -132,10 +140,38 @@ Sur les 3 textes signalés comme fuites :
 Les écarts à la référence sans fuite viennent surtout d'ambiguïtés héritées des données : noms
 complets en une ou deux étiquettes, confusion entre code postal et numéro de rue.
 
+### 7. Évaluation sur textes réalistes (v1)
+
+[Notebook 05](notebooks/05-test-realiste.ipynb). Le jeu de test réaliste est construit avec
+[`src/annotation.py`](src/annotation.py) : on écrit un texte et la liste de ses données
+personnelles, les positions et la réponse de référence sont calculées automatiquement. Il couvre
+les contextes médical, RH, service client, administratif, bancaire et messagerie, avec des cas
+difficiles (prénoms qui sont aussi des noms communs, noms composés, formats de téléphone variés,
+noms répétés) et 6 textes sans donnée personnelle.
+
+Sur 236 entités, 7 ne sont pas masquées, réparties dans 6 textes :
+- **heures au format français** (« 17h15 », « 9h00 ») et **date précédée du jour** (« mardi 8 avril ») :
+  les données d'entraînement utilisent surtout d'autres formats (« 11:16 PM ») ;
+- **noms de rue composés de mots courants** (« rue de la République », « place de la Mairie »),
+  laissés intacts alors que les noms de rue tirés de noms de personnes sont masqués ;
+- **deux différences de convention** : le modèle conserve « rue » et masque le nom de la voie
+  (« rue [STREET] »), comme dans les données d'entraînement, alors que le guide d'annotation inclut
+  le type de voie. La métrique stricte compte ces cas comme des fuites ; sans eux, 92 % des textes
+  seraient sans fuite.
+
+Des erreurs de fidélité apparaissent aussi : deux dates fusionnées en une seule étiquette, un nom
+d'établissement masqué à tort (« hôpital Pellegrin »), et une faute de frappe introduite dans un
+texte sans aucune donnée personnelle (« vestiaires » → « vestiares »).
+
+Ces faiblesses orientent la suite du projet. Les paires de préférences du DPO seront construites
+sur des textes d'entraînement distincts du jeu de test, pour que celui-ci reste une mesure fiable.
+
 ## Limites
 
-- **Données synthétiques** : phrases parfois artificielles, noms très internationaux et peu
-  représentatifs des noms français courants ; le test actuel est de même distribution que l'entraînement.
+- **Données synthétiques** : phrases parfois artificielles, noms très internationaux, formats
+  français sous-représentés ; le jeu de test réaliste ne compte que 50 textes.
+- **Fidélité de la recopie** : un petit modèle peut modifier un mot du texte non personnel ;
+  une relecture reste nécessaire avant diffusion d'un document anonymisé.
 - **Définition des données personnelles** héritée du jeu de données : les heures (TIME) et les
   titres (TITLE) sont considérés comme personnels, ce qui est discutable.
 - **Types rares** : quelques cas seulement dans le test (4 pour GENDER, 7 pour SOCIALNUM),
@@ -145,22 +181,25 @@ complets en une ou deux étiquettes, confusion entre code postal et numéro de r
 
 ## Suite du projet
 
-- [ ] Jeu de test de textes français réalistes, écrits et annotés à la main
+- [x] Jeu de test de textes français réalistes
+- [ ] DPO ciblé sur les faiblesses observées (formats français de dates et d'heures, noms de rue, fidélité)
 - [ ] v2 : nettoyage complet (déduplication, plafonnement par structure, échantillonnage des types rares, filtre qualité)
-- [ ] v3 : DPO à partir des erreurs du modèle
 - [ ] Publication de l'adaptateur LoRA sur le Hugging Face Hub
 
 ## Structure du dépôt
 
 ```
-├── notebooks/          # Exploration, préparation, baseline, SFT (exécutés sur Kaggle)
+├── notebooks/          # Exploration, préparation, baseline, SFT, test réaliste (exécutés sur Kaggle)
 ├── src/
 │   ├── cleaning.py     # Nettoyage et échantillonnage des données
 │   ├── prompt.py       # Consigne et format des exemples, communs à l'entraînement et à l'évaluation
 │   ├── generation.py   # Génération des anonymisations par lots
-│   └── evaluation.py   # Métriques : protection, préservation, correspondance exacte
+│   ├── evaluation.py   # Métriques : protection, préservation, correspondance exacte
+│   └── annotation.py   # Construction d'exemples annotés (jeu de test réaliste)
+├── data/
+│   └── test_realiste.jsonl  # 50 textes réalistes annotés
 ├── tests/              # Tests unitaires (pytest)
-└── docs/               # Figures
+└── docs/               # Figures et guide d'annotation
 ```
 
 ## Reproduire
