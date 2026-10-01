@@ -204,6 +204,13 @@ Un premier essai a dépassé la mémoire du GPU : le DPO calcule les logits de d
 exemple, pour le modèle et sa référence, sur un vocabulaire de 152 000 tokens. Le batch a été
 réduit et compensé par l'accumulation de gradients.
 
+![Loss et récompenses implicites pendant le DPO](docs/dpo_v3.png)
+
+L'entraînement se déroule comme attendu : sur la validation, le modèle préfère la réponse choisie
+dans 91 à 93 % des paires, la marge entre réponses choisie et rejetée passe de 0,9 à 2,6, et la
+récompense de la réponse choisie reste stable grâce à la loss SFT pendant que celle de la réponse
+rejetée chute.
+
 **Résultats** : toutes les fuites du test réaliste disparaissent (100 % de textes sans fuite,
 heures, dates et rues comprises). Mais l'analyse des sorties révèle une **sur-optimisation** :
 - des **masquages injustifiés** : « carte Vitale » → « carte [CITY] », « lundi de Pâques » →
