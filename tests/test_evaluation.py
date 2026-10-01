@@ -1,9 +1,12 @@
 import pytest
 
+from src.annotation import construire_exemple as construire
 from src.evaluation import (
     entite_protegee,
+    etiquettes_inventees,
     evaluer,
     evaluer_exemple,
+    mots_ajoutes,
     mots_hors_donnees_personnelles,
     valeur_presente,
 )
@@ -171,3 +174,41 @@ def test_texte_sans_entite_compte_comme_sans_fuite():
 def test_evaluer_refuse_des_listes_de_tailles_differentes():
     with pytest.raises(ValueError):
         evaluer([EXEMPLE], [])
+
+
+# --- fidélité ---
+
+def test_sortie_parfaite_est_fidele():
+    r = evaluer_exemple(EXEMPLE, SORTIE_PARFAITE)
+    assert r["fidele"]
+    assert r["mots_ajoutes"] == [] and r["etiquettes_inventees"] == []
+
+
+def test_mot_modifie_est_detecte():
+    # Cas réel : « pendant 5 jours » réécrit en « pendant [AGE] ans ».
+    ex = construire("Paracétamol pendant 5 jours.", [])
+    assert mots_ajoutes(ex["source_text"], "Paracétamol pendant [AGE] ans.") == ["ans"]
+
+
+def test_faute_de_frappe_est_detectee():
+    assert mots_ajoutes("Les vestiaires sont fermés.", "Les vestiares sont fermés.") == ["vestiares"]
+
+
+def test_etiquette_inventee_est_detectee():
+    assert etiquettes_inventees("[GIVENNAME], [RESOURCES_HUMANITIES]") == ["RESOURCES_HUMANITIES"]
+
+
+def test_crochets_non_latins_detectes():
+    # Cas réel : « 1 g » réécrit en « [量] g ».
+    assert etiquettes_inventees("paracétamol [量] g") == ["量"]
+    assert mots_ajoutes("paracétamol 1 g", "paracétamol [量] g") == ["量"]
+
+
+def test_masquage_sans_ajout_reste_fidele():
+    # Masquer en trop fait perdre un mot (préservation) mais n'en ajoute pas (fidélité).
+    assert mots_ajoutes("La carte Vitale.", "La carte [CITY].") == []
+
+
+def test_taux_de_textes_fideles():
+    resultats = evaluer([EXEMPLE, EXEMPLE], [SORTIE_PARFAITE, "Appelez [GIVENNAME] [SURNAME] au [TELEPHONENUM] demain."])
+    assert resultats["textes_fideles"] == 0.5

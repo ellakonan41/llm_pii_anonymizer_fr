@@ -4,17 +4,21 @@ Un exemple contient `source_text`, `masked_text` (référence, étiquettes
 dénumérotées) et `privacy_mask` (liste d'entités avec `label`, `value`,
 `start`, `end`). La sortie du modèle est le texte anonymisé qu'il a produit.
 
-Trois mesures :
+Quatre mesures :
 - protection : part des données personnelles qui ont disparu de la sortie
   (métrique principale, un oubli étant une fuite) ;
 - préservation : part des mots hors données personnelles conservés
   (un modèle qui masque tout n'est pas utile) ;
+- fidélité : part des textes sans mot ajouté ni étiquette inventée
+  (la préservation ne voit pas ce que le modèle ajoute ou modifie) ;
 - correspondance exacte avec la référence (indicative, sensible aux
   incohérences d'annotation du jeu de données).
 """
 
 import re
 from collections import Counter, defaultdict
+
+from src.prompt import ETIQUETTES
 
 # Longueur minimale d'un fragment de valeur pour être recherché seul
 # (évite de compter comme fuite un « 06 » ou un « M » présent ailleurs).
@@ -28,6 +32,30 @@ _ETIQUETTE = re.compile(r"\[[A-Z0-9_]+\]")
 def retirer_etiquettes(texte: str) -> str:
     """Remplace les étiquettes entre crochets par un espace."""
     return _ETIQUETTE.sub(" ", texte)
+
+
+# Tout contenu entre crochets, pour repérer les étiquettes inventées ([RESOURCES_HUMANITIES], [量]...).
+_CROCHETS = re.compile(r"\[([^\[\]]+)\]")
+
+
+def etiquettes_inventees(sortie: str) -> list[str]:
+    """Étiquettes de la sortie qui ne font pas partie des types autorisés."""
+    return [e for e in _CROCHETS.findall(sortie) if e not in ETIQUETTES]
+
+
+def mots_ajoutes(source: str, sortie: str) -> list[str]:
+    """Mots de la sortie absents du texte original (hors étiquettes valides).
+
+    Repère les mots inventés ou modifiés par le modèle : « 5 jours » réécrit
+    en « [AGE] ans » ajoute « ans », une faute de frappe ajoute un mot inconnu.
+    """
+    sortie_sans_etiquettes = _CROCHETS.sub(
+        lambda m: " " if m.group(1) in ETIQUETTES else m.group(0), sortie
+    )
+    ajoutes = Counter(re.findall(r"\w+", sortie_sans_etiquettes.lower())) - Counter(
+        re.findall(r"\w+", source.lower())
+    )
+    return sorted(ajoutes.elements())
 
 
 def valeur_presente(valeur: str, texte: str) -> bool:
@@ -79,6 +107,8 @@ def evaluer_exemple(exemple: dict, sortie: str) -> dict:
 
     mots_sortie = Counter(re.findall(r"\w+", retirer_etiquettes(sortie).lower()))
     mots_conserves = sum((mots_attendus & mots_sortie).values())
+    ajoutes = mots_ajoutes(exemple["source_text"], sortie)
+    inventees = etiquettes_inventees(sortie)
 
     return {
         "nb_entites": len(exemple["privacy_mask"]),
@@ -86,6 +116,9 @@ def evaluer_exemple(exemple: dict, sortie: str) -> dict:
         "par_type": dict(par_type),
         "nb_mots_attendus": sum(mots_attendus.values()),
         "nb_mots_conserves": mots_conserves,
+        "mots_ajoutes": ajoutes,
+        "etiquettes_inventees": inventees,
+        "fidele": not ajoutes and not inventees,
         "exact": " ".join(sortie.split()) == " ".join(exemple["masked_text"].split()),
     }
 
@@ -119,6 +152,7 @@ def evaluer(exemples: list[dict], sorties: list[str]) -> dict:
             sum(r["nb_mots_conserves"] for r in resultats),
             sum(r["nb_mots_attendus"] for r in resultats),
         ),
+        "textes_fideles": _taux(sum(r["fidele"] for r in resultats), len(resultats)),
         "correspondance_exacte": _taux(sum(r["exact"] for r in resultats), len(resultats)),
         "protection_par_type": {
             label: _taux(c["protegees"], c["total"])
